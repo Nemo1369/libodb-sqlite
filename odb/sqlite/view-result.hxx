@@ -15,6 +15,7 @@
 
 #include <odb/sqlite/version.hxx>
 #include <odb/sqlite/forward.hxx> // query, view_statements
+#include <odb/sqlite/result.hxx>
 #include <odb/sqlite/statement.hxx>
 
 namespace odb
