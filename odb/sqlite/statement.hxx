@@ -124,6 +124,10 @@ namespace odb
       connection_type& conn_;
       auto_handle<sqlite3_stmt> stmt_;
 
+#if SQLITE_VERSION_NUMBER < 3005003
+      std::string text_;
+#endif
+
       bool active_;
 
     private:
@@ -132,7 +136,7 @@ namespace odb
 
       // Doubly-linked list of active statements.
       //
-    private:
+    protected:
       void
       list_add ()
       {
