@@ -100,24 +100,19 @@ namespace odb
     query_base query_column<T, ID>::
     in_range (I begin, I end) const
     {
-      if (begin != end)
+      query_base q (table_, column_);
+      q += "IN (";
+
+      for (I i (begin); i != end; ++i)
       {
-        query_base q (table_, column_);
-        q += "IN (";
+        if (i != begin)
+          q += ",";
 
-        for (I i (begin); i != end; ++i)
-        {
-          if (i != begin)
-            q += ",";
-
-          q.append<T, ID> (val_bind<T> (*i), conversion_);
-        }
-
-        q += ")";
-        return q;
+        q.append<T, ID> (val_bind<T> (*i), conversion_);
       }
-      else
-        return query_base (false);
+
+      q += ")";
+      return q;
     }
 
     // like

@@ -30,8 +30,7 @@ namespace odb
   {
     class connection;
 
-    class LIBODB_SQLITE_EXPORT statement: public odb::statement,
-                                          public active_object
+    class LIBODB_SQLITE_EXPORT statement: public odb::statement
     {
     public:
       typedef sqlite::connection connection_type;
@@ -73,7 +72,7 @@ namespace odb
                  statement_kind sk,
                  const binding* process,
                  bool optimize)
-          : active_object (conn)
+        : conn_ (conn)
       {
         init (text.c_str (), text.size (), sk, process, optimize);
       }
@@ -83,7 +82,7 @@ namespace odb
                  statement_kind sk,
                  const binding* process,
                  bool optimize)
-          : active_object (conn)
+        : conn_ (conn)
       {
         init (text, std::strlen (text), sk, process, optimize);
       }
@@ -94,15 +93,13 @@ namespace odb
                  statement_kind sk,
                  const binding* process,
                  bool optimize)
-          : active_object (conn)
+        : conn_ (conn)
       {
         init (text, text_size, sk, process, optimize);
       }
 
     protected:
-      // Return true if we bound any stream parameters.
-      //
-      bool
+      void
       bind_param (const bind*, std::size_t count);
 
       // Extract row columns into the bound buffers. If the truncated
@@ -112,21 +109,6 @@ namespace odb
       //
       bool
       bind_result (const bind*, std::size_t count, bool truncated = false);
-
-      // Stream (so to speak) parameters.
-      //
-      struct stream_data
-      {
-        std::string db;
-        std::string table;
-        long long rowid;
-      };
-
-      void
-      stream_param (const bind*, std::size_t count, const stream_data&);
-
-      friend void
-      update_hook (void*, const char*, const char*, long long);
 
       // Active state.
       //
@@ -164,12 +146,10 @@ namespace odb
         return r;
       }
 
-      // The active_object interface.
-      //
-      virtual void
-      clear ();
-
     protected:
+      friend class sqlite::connection;
+
+      connection_type& conn_;
       auto_handle<sqlite3_stmt> stmt_;
 
 #if SQLITE_VERSION_NUMBER < 3005003
@@ -185,6 +165,38 @@ namespace odb
             statement_kind,
             const binding* process,
             bool optimize);
+
+      // Doubly-linked list of active statements.
+      //
+    protected:
+      void
+      list_add ()
+      {
+        next_ = conn_.statements_;
+        conn_.statements_ = this;
+
+        if (next_ != 0)
+          next_->prev_ = this;
+      }
+
+      void
+      list_remove ()
+      {
+        (prev_ == 0 ? conn_.statements_ : prev_->next_) = next_;
+
+        if (next_ != 0)
+          next_->prev_ = prev_;
+
+        prev_ = 0;
+        next_ = this;
+      }
+
+      // prev_ == 0 means we are the first element.
+      // next_ == 0 means we are the last element.
+      // next_ == this means we are not on the list (prev_ should be 0).
+      //
+      statement* prev_;
+      statement* next_;
     };
 
     class LIBODB_SQLITE_EXPORT generic_statement: public statement
@@ -297,7 +309,7 @@ namespace odb
       binding& result_;
     };
 
-    struct auto_result
+    struct LIBODB_SQLITE_EXPORT auto_result
     {
       explicit auto_result (select_statement& s): s_ (s) {}
       ~auto_result () {s_.free_result ();}

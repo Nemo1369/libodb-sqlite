@@ -11,7 +11,7 @@
 #include <odb/sqlite/error.hxx>
 
 #include <odb/sqlite/details/config.hxx> // LIBODB_SQLITE_HAVE_UNLOCK_NOTIFY
-                                         // LIBODB_SQLITE_HAVE_COLUMN_METADATA
+
 using namespace std;
 
 namespace odb
@@ -42,12 +42,6 @@ namespace odb
     }
 
     void statement::
-    clear ()
-    {
-      reset ();
-    }
-
-    void statement::
     init (const char* text,
           std::size_t text_size,
           statement_kind sk,
@@ -55,6 +49,8 @@ namespace odb
           bool optimize)
     {
       active_ = false;
+      prev_ = 0;
+      next_ = this;
 
       string tmp;
       if (proc != 0)
@@ -62,25 +58,23 @@ namespace odb
         switch (sk)
         {
         case statement_select:
-          process_select (tmp,
-                          text,
+          process_select (text,
                           &proc->bind->buffer, proc->count, sizeof (bind),
                           '"', '"',
-                          optimize);
+                          optimize,
+                          tmp);
           break;
         case statement_insert:
-          process_insert (tmp,
-                          text,
+          process_insert (text,
                           &proc->bind->buffer, proc->count, sizeof (bind),
                           '?',
-                          '$');
+                          tmp);
           break;
         case statement_update:
-          process_update (tmp,
-                          text,
+          process_update (text,
                           &proc->bind->buffer, proc->count, sizeof (bind),
                           '?',
-                          '$');
+                          tmp);
           break;
         case statement_delete:
         case statement_generic:
@@ -108,10 +102,9 @@ namespace odb
         {
           // Temporarily store the statement text in prev_ so that
           // text() which may be called by the tracer can access it.
-          // Dirty but efficient.
           //
 #if SQLITE_VERSION_NUMBER >= 3005003
-          prev_ = reinterpret_cast<active_object*> (const_cast<char*> (text));
+          prev_ = reinterpret_cast<statement*> (const_cast<char*> (text));
 #endif
           t->prepare (conn_, *this);
 #if SQLITE_VERSION_NUMBER >= 3005003
@@ -166,11 +159,10 @@ namespace odb
 #endif
     }
 
-    bool statement::
+    void statement::
     bind_param (const bind* p, size_t n)
     {
       int e (SQLITE_OK);
-      bool r (false);
 
       // SQLite parameters are counted from 1.
       //
@@ -239,25 +231,11 @@ namespace odb
                                    SQLITE_STATIC);
             break;
           }
-        case bind::stream:
-          {
-#if SQLITE_VERSION_NUMBER >= 3004000
-            e = sqlite3_bind_zeroblob (stmt_,
-                                       c,
-                                       static_cast<int> (*b.size));
-            r = true;
-#else
-            assert (false);
-#endif
-            break;
-          }
         }
       }
 
       if (e != SQLITE_OK)
         translate_error (e, conn_);
-
-      return r;
     }
 
     bool statement::
@@ -275,9 +253,6 @@ namespace odb
           continue;
 
         int c (col++);
-
-        if (b.type == bind::stream)
-          col++; // Skip ROWID value that follows.
 
         if (truncated && (b.truncated == 0 || !*b.truncated))
           continue;
@@ -345,31 +320,6 @@ namespace odb
             memcpy (b.buffer, d, *b.size);
             break;
           }
-        case bind::stream:
-          {
-            stream_buffers& sb (*static_cast<stream_buffers*> (b.buffer));
-
-            // SQLite documentation states that these are valid until the
-            // statement is finalized (or reprepared). For our case, we
-            // only need it to stay alive until we call set_value() which
-            // we do while executing the statement (i.e., we don't copy
-            // images for later processing).
-            //
-#ifdef LIBODB_SQLITE_HAVE_COLUMN_METADATA
-            sb.db.in = sqlite3_column_database_name (stmt_, c);
-            sb.table.in = sqlite3_column_table_name (stmt_, c);
-            sb.column.in = sqlite3_column_origin_name (stmt_, c);
-#else
-            assert (false);
-#endif
-
-            // The ROWID comes in the following column.
-            //
-            sb.rowid.in = static_cast<long long> (
-              sqlite3_column_int64 (stmt_, c + 1));
-
-            break;
-          }
         }
       }
 
@@ -381,61 +331,6 @@ namespace odb
       assert (col == col_count);
 
       return r;
-    }
-
-    void statement::
-    stream_param (const bind* p, size_t n, const stream_data& d)
-    {
-      // Code similar to bind_param().
-      //
-      for (size_t i (0), j (1); i < n; ++i)
-      {
-        const bind& b (p[i]);
-
-        if (b.buffer == 0) // Skip NULL entries.
-          continue;
-
-        int c (static_cast<int> (j++));
-
-        if ((b.is_null != 0 && *b.is_null) || b.type != bind::stream)
-          continue;
-
-        // Get column name.
-        //
-        const char* col (sqlite3_bind_parameter_name (stmt_, c));
-        assert (col != 0); // Statement doesn't contain column name.
-
-        stream_buffers& sb (*static_cast<stream_buffers*> (b.buffer));
-
-        *sb.db.out = d.db;
-        *sb.table.out = d.table;
-        *sb.column.out = col + 1; // Skip '$'.
-        *sb.rowid.out = d.rowid;
-      }
-    }
-
-    inline void
-    update_hook (void* v, const char* db, const char* table, long long rowid)
-    {
-      statement::stream_data& d (*static_cast<statement::stream_data*> (v));
-      d.db = db;
-      d.table = table;
-      d.rowid = rowid;
-    }
-
-    extern "C" void
-    odb_sqlite_update_hook (void* v,
-                            int,
-                            const char* db,
-                            const char* table,
-#if SQLITE_VERSION_NUMBER >= 3005000
-                                    sqlite3_int64 rowid
-#else
-                                    sqlite_int64 rowid
-#endif
-    )
-    {
-      update_hook (v, db, table, static_cast<long long> (rowid));
     }
 
     // generic_statement
@@ -462,7 +357,7 @@ namespace odb
     generic_statement::
     generic_statement (connection_type& conn,
                        const char* text,
-                       size_t text_size)
+                       std::size_t text_size)
         : statement (conn,
                      text, text_size, statement_generic,
                      0, false),
@@ -745,16 +640,12 @@ namespace odb
           t->execute (conn_, *this);
       }
 
-      sqlite3* h (conn_.handle ());
-      bool stream (bind_param (param_.bind, param_.count));
-
-      stream_data sd;
-      if (stream)
-        sqlite3_update_hook (h, &odb_sqlite_update_hook, &sd);
+      bind_param (param_.bind, param_.count);
 
       int e;
 
 #ifdef LIBODB_SQLITE_HAVE_UNLOCK_NOTIFY
+      sqlite3* h (conn_.handle ());
       while ((e = sqlite3_step (stmt_)) == SQLITE_LOCKED)
       {
         if (sqlite3_extended_errcode (h) != SQLITE_LOCKED_SHAREDCACHE)
@@ -766,9 +657,6 @@ namespace odb
 #else
       e = sqlite3_step (stmt_);
 #endif
-
-      if (stream)
-        sqlite3_update_hook (h, 0, 0); // Clear the hook.
 
       // sqlite3_step() will return a detailed error code only if we used
       // sqlite3_prepare_v2(). Otherwise, sqlite3_reset() returns the
@@ -796,11 +684,6 @@ namespace odb
           translate_error (e, conn_);
       }
 
-      // Stream parameters, if any.
-      //
-      if (stream)
-        stream_param (param_.bind, param_.count, sd);
-
       if (returning_ != 0)
       {
         bind& b (returning_->bind[0]);
@@ -808,7 +691,7 @@ namespace odb
         *b.is_null = false;
         *static_cast<long long*> (b.buffer) =
           static_cast<long long> (
-            sqlite3_last_insert_rowid (h));
+            sqlite3_last_insert_rowid (conn_.handle ()));
       }
 
       return true;
@@ -852,14 +735,10 @@ namespace odb
           t->execute (conn_, *this);
       }
 
-      sqlite3* h (conn_.handle ());
-      bool stream (bind_param (param_.bind, param_.count));
-
-      stream_data sd;
-      if (stream)
-        sqlite3_update_hook (h, &odb_sqlite_update_hook, &sd);
+      bind_param (param_.bind, param_.count);
 
       int e;
+      sqlite3* h (conn_.handle ());
 
 #ifdef LIBODB_SQLITE_HAVE_UNLOCK_NOTIFY
       while ((e = sqlite3_step (stmt_)) == SQLITE_LOCKED)
@@ -873,9 +752,6 @@ namespace odb
 #else
       e = sqlite3_step (stmt_);
 #endif
-
-      if (stream)
-        sqlite3_update_hook (h, 0, 0); // Clear the hook.
 
       // sqlite3_step() will return a detailed error code only if we used
       // sqlite3_prepare_v2(). Otherwise, sqlite3_reset() returns the
@@ -892,14 +768,7 @@ namespace odb
 #endif
         translate_error (e, conn_);
 
-      int r (sqlite3_changes (h));
-
-      // Stream parameters, if any.
-      //
-      if (stream && r != 0)
-        stream_param (param_.bind, param_.count, sd);
-
-      return static_cast<unsigned long long> (r);
+      return static_cast<unsigned long long> (sqlite3_changes (h));
     }
 
     // delete_statement

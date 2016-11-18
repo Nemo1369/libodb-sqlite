@@ -7,14 +7,11 @@
 
 // no pre
 
-#ifdef ODB_COMPILER
+#ifdef _MSC_VER
+#elif defined(ODB_COMPILER)
 #  error libodb-sqlite header included in odb-compiled header
-#elif !defined(LIBODB_SQLITE_BUILD2)
-#  ifdef _MSC_VER
-#    include <odb/sqlite/details/config-vc.h>
-#  else
-#    include <odb/sqlite/details/config.h>
-#  endif
+#else
+#  include <odb/sqlite/details/config.h>
 #endif
 
 // no post

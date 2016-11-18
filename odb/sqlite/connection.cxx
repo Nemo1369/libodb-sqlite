@@ -29,13 +29,12 @@ namespace odb
   namespace sqlite
   {
     connection::
-    connection (connection_factory& cf, int extra_flags)
-        : odb::connection (cf),
+    connection (database_type& db, int extra_flags)
+        : odb::connection (db),
+          db_ (db),
           unlock_cond_ (unlock_mutex_),
-          active_objects_ (0)
+          statements_ (0)
     {
-      database_type& db (database ());
-
       int f (db.flags () | extra_flags);
       const string& n (db.name ());
 
@@ -82,11 +81,12 @@ namespace odb
     }
 
     connection::
-    connection (connection_factory& cf, sqlite3* handle)
-        : odb::connection (cf),
+    connection (database_type& db, sqlite3* handle)
+        : odb::connection (db),
+          db_ (db),
           handle_ (handle),
           unlock_cond_ (unlock_mutex_),
-          active_objects_ (0)
+          statements_ (0)
     {
       init ();
     }
@@ -94,16 +94,14 @@ namespace odb
     void connection::
     init ()
     {
-      database_type& db (database ());
-
       // Enable/disable foreign key constraints.
       //
       generic_statement st (
         *this,
-        db.foreign_keys ()
+        db_.foreign_keys ()
         ? "PRAGMA foreign_keys=ON"
         : "PRAGMA foreign_keys=OFF",
-        db.foreign_keys () ? 22 : 23);
+        db_.foreign_keys () ? 22 : 23);
       st.execute ();
 
       // Create statement cache.
@@ -177,7 +175,7 @@ namespace odb
       details::lock l (unlock_mutex_);
 
       while (!unlocked_)
-        unlock_cond_.wait (l);
+        unlock_cond_.wait ();
 #else
       translate_error (SQLITE_LOCKED, *this);
 #endif
@@ -186,25 +184,11 @@ namespace odb
     void connection::
     clear ()
     {
-      // The current first active_object will remove itself from the list
-      // and make the second object (if any) the new first.
+      // The current first statement will remove itself from the list
+      // and make the second statement (if any) the new first.
       //
-      while (active_objects_ != 0)
-        active_objects_->clear ();
-    }
-
-    // connection_factory
-    //
-    connection_factory::
-    ~connection_factory ()
-    {
-    }
-
-    void connection_factory::
-    database (database_type& db)
-    {
-      odb::connection_factory::db_ = &db;
-      db_ = &db;
+      while (statements_ != 0)
+        statements_->reset ();
     }
   }
 }

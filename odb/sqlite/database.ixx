@@ -2,28 +2,12 @@
 // copyright : Copyright (c) 2009-2015 Code Synthesis Tools CC
 // license   : GNU GPL v2; see accompanying LICENSE file
 
-#include <utility> // move()
-
 #include <odb/sqlite/transaction.hxx>
 
 namespace odb
 {
   namespace sqlite
   {
-#ifdef ODB_CXX11
-    inline database::
-    database (database&& db) // Has to be inline.
-        : odb::database (std::move (db)),
-          name_ (std::move (db.name_)),
-          flags_ (db.flags_),
-          foreign_keys_ (db.foreign_keys_),
-          vfs_ (std::move (db.vfs_)),
-          factory_ (std::move (db.factory_))
-    {
-      factory_->database (*this); // New database instance.
-    }
-#endif
-
     inline connection_ptr database::
     connection ()
     {
@@ -452,7 +436,7 @@ namespace odb
     }
 
     template <typename T>
-    inline typename result<T>::pointer_type database::
+    inline typename object_traits<T>::pointer_type database::
     query_one ()
     {
       return query_one<T> (sqlite::query_base ());
@@ -473,7 +457,7 @@ namespace odb
     }
 
     template <typename T>
-    inline typename result<T>::pointer_type database::
+    inline typename object_traits<T>::pointer_type database::
     query_one (const char* q)
     {
       return query_one<T> (sqlite::query_base (q));
@@ -494,7 +478,7 @@ namespace odb
     }
 
     template <typename T>
-    inline typename result<T>::pointer_type database::
+    inline typename object_traits<T>::pointer_type database::
     query_one (const std::string& q)
     {
       return query_one<T> (sqlite::query_base (q));
@@ -515,7 +499,7 @@ namespace odb
     }
 
     template <typename T>
-    inline typename result<T>::pointer_type database::
+    inline typename object_traits<T>::pointer_type database::
     query_one (const sqlite::query_base& q)
     {
       // T is always object_type. We also don't need to check for transaction
@@ -545,7 +529,7 @@ namespace odb
     }
 
     template <typename T>
-    inline typename result<T>::pointer_type database::
+    inline typename object_traits<T>::pointer_type database::
     query_one (const odb::query_base& q)
     {
       // Translate to native query.
