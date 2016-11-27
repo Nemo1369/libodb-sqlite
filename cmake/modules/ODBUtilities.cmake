@@ -1,13 +1,27 @@
 set(ODB_COMPILE_DEBUG FALSE)
-set(ODB_COMPILE_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/odb_gen")
-set(ODB_COMPILE_HEADER_SUFFIX ".h")
+set(ODB_COMPILE_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
+set(ODB_COMPILE_HEADER_SUFFIX ".hpp")
 set(ODB_COMPILE_INLINE_SUFFIX "_inline.h")
 set(ODB_COMPILE_SOURCE_SUFFIX ".cpp")
 set(ODB_COMPILE_FILE_SUFFIX "_odb")
 
 set(CMAKE_INCLUDE_CURRENT_DIR TRUE)
 
-function(odb_prepare_includes input_includes)
+function(odb_append_options input_options)
+    if(NOT ODB_EXECUTABLE)
+        message(FATAL_ERROR "odb compiler executable not found")
+    endif()
+
+    get_filename_component(ODB_EXECUTABLE_DIR ${ODB_EXECUTABLE} DIRECTORY)
+
+    set(OPTIONS_FILE "${ODB_EXECUTABLE_DIR}/../etc/odb/default.options")
+
+    foreach(iterator ${input_options})
+        file(APPEND ${OPTIONS_FILE} "${iterator}\n")
+    endforeach()
+endfunction()
+
+function(odb_prepare_options input_options)
     if(NOT ODB_EXECUTABLE)
         message(FATAL_ERROR "odb compiler executable not found")
     endif()
@@ -18,14 +32,21 @@ function(odb_prepare_includes input_includes)
 
     file(WRITE ${OPTIONS_FILE} "")
 
+    odb_append_options(${input_options})
+endfunction()
+
+function(odb_prepare_includes input_includes output_includes)
     foreach(iterator ${input_includes})
-        set(SEMICOLON_ITERATOR_INCLUDE "-I ${iterator}\n")
+        set(SEMICOLON_ITERATOR_INCLUDE "${iterator}")
 
         string(REPLACE ";" " " ITERATOR_INCLUDE "${SEMICOLON_ITERATOR_INCLUDE}")
         string(REPLACE "$<BUILD_INTERFACE:" "" ITERATOR_INCLUDE "${ITERATOR_INCLUDE}")
         string(REPLACE ">" "" ITERATOR_INCLUDE "${ITERATOR_INCLUDE}")
-        file(APPEND ${OPTIONS_FILE} "${ITERATOR_INCLUDE}")
+
+        list(APPEND ${output_includes} "${ITERATOR_INCLUDE}")
     endforeach()
+
+    set(${output_includes} ${${output_includes}} PARENT_SCOPE)
 endfunction()
 
 function(odb_compile outvar)
@@ -33,14 +54,15 @@ function(odb_compile outvar)
         message(FATAL_ERROR "odb compiler executable not found")
     endif()
 
-    set(options GENERATE_QUERY GENERATE_SESSION GENERATE_SCHEMA GENERATE_PREPARED)
+    set(options GENERATE_QUERY GENERATE_SESSION GENERATE_SCHEMA GENERATE_PREPARED INCLUDE_WITH_BRACKETS)
     set(oneValueParams SCHEMA_FORMAT SCHEMA_NAME TABLE_PREFIX
-        STANDARD SLOC_LIMIT
-        HEADER_PROLOGUE INLINE_PROLOGUE SOURCE_PROLOGUE
-        HEADER_EPILOGUE INLINE_EPILOGUE SOURCE_EPILOGUE
-        MULTI_DATABASE
-        PROFILE)
-    set(multiValueParams FILES INCLUDE DB)
+            INCLUDE_PREFIX
+            STANDARD SLOC_LIMIT
+            HEADER_PROLOGUE INLINE_PROLOGUE SOURCE_PROLOGUE
+            HEADER_EPILOGUE INLINE_EPILOGUE SOURCE_EPILOGUE
+            MULTI_DATABASE
+            PROFILE)
+    set(multiValueParams FILES INCLUDE DEFINITIONS DB)
 
     cmake_parse_arguments(PARAM "${options}" "${oneValueParams}" "${multiValueParams}" ${ARGN})
 
@@ -62,6 +84,14 @@ function(odb_compile outvar)
     foreach(db ${PARAM_DB})
         list(APPEND ODB_ARGS -d "${db}")
     endforeach()
+
+    if(PARAM_INCLUDE_WITH_BRACKETS)
+        list(APPEND ODB_ARGS --include-with-brackets)
+    endif()
+
+    if(PARAM_INCLUDE_PREFIX)
+        list(APPEND ODB_ARGS --include-prefix "${PARAM_INCLUDE_PREFIX}")
+    endif()
 
     if(PARAM_GENERATE_QUERY)
         list(APPEND ODB_ARGS --generate-query)
@@ -148,8 +178,18 @@ function(odb_compile outvar)
         list(APPEND ODB_ARGS --odb-file-suffix "${sfx}")
     endforeach()
 
-    foreach(dir ${PARAM_INCLUDE} ${ODB_INCLUDE_DIRS})
-        list(APPEND ODB_ARGS "-I${dir}")
+    if(ODB_INCLUDE_DIRS)
+        foreach(dir ${PARAM_INCLUDE} ${ODB_INCLUDE_DIRS})
+            list(APPEND ODB_ARGS "-I${dir}")
+        endforeach()
+    else()
+        foreach(dir ${PARAM_INCLUDE})
+            list(APPEND ODB_ARGS "-I${dir}")
+        endforeach()
+    endif()
+
+    foreach(definition ${PARAM_DEFINITIONS})
+        list(APPEND ODB_ARGS "-D${definition}")
     endforeach()
 
     file(REMOVE_RECURSE "${ODB_COMPILE_OUTPUT_DIR}")
@@ -177,10 +217,10 @@ function(odb_compile outvar)
         endif()
 
         add_custom_command(OUTPUT ${outputs}
-            COMMAND ${ODB_EXECUTABLE} ${ODB_ARGS} "${input}"
-            DEPENDS "${input}"
-            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-            VERBATIM)
+                COMMAND ${ODB_EXECUTABLE} ${ODB_ARGS} "${input}"
+                DEPENDS "${input}"
+                WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+                VERBATIM)
     endforeach()
 
     set(${outvar} ${${outvar}} PARENT_SCOPE)
