@@ -14,9 +14,9 @@ target_architecture(CMAKE_TARGET_ARCHITECTURE)
 
 if(MSVC AND NOT EXISTS "${CMAKE_BINARY_DIR}/ALL_BUILD.vcxproj.user")
     file(GENERATE
-        OUTPUT "${CMAKE_BINARY_DIR}/ALL_BUILD.vcxproj.user"
-        INPUT "${CMAKE_SOURCE_DIR}/cmake/ALL_BUILD.vcxproj.user.in"
-        )
+            OUTPUT "${CMAKE_BINARY_DIR}/ALL_BUILD.vcxproj.user"
+            INPUT "${CMAKE_SOURCE_DIR}/cmake/ALL_BUILD.vcxproj.user.in"
+            )
 endif()
 
 option(BUILD_UNIT_TESTS "Build unit tests" FALSE)
@@ -38,22 +38,29 @@ endif()
 find_package(ODB)
 
 if(NOT ${CMAKE_TARGET_ARCHITECTURE} STREQUAL ${CMAKE_HOST_SYSTEM_PROCESSOR} OR NOT ODB_LIBODB_FOUND)
-    if (NOT TARGET odb AND ODB_LIBODB_SOURCES_DIR)
+    if(NOT TARGET odb AND ODB_LIBODB_SOURCES_DIR)
         get_filename_component(ABSOLUTE_LIBODB_SOURCES_DIR ${ODB_LIBODB_SOURCES_DIR} ABSOLUTE)
         get_filename_component(LIBODB_SOURCES_DIR_NAME ${ODB_LIBODB_SOURCES_DIR}
                 NAME)
 
         add_subdirectory(${ABSOLUTE_LIBODB_SOURCES_DIR}
-            ${CMAKE_BINARY_DIR}/${LIBODB_SOURCES_DIR_NAME})
+                ${CMAKE_BINARY_DIR}/${LIBODB_SOURCES_DIR_NAME})
     endif()
 endif()
 
-configure_file(${PROJECT_SOURCE_DIR}/odb/sqlite/details/config.h.in
-    ${PROJECT_SOURCE_DIR}/odb/sqlite/details/config.h)
+if(NOT BUILD_SHARED_LIBRARIES)
+    set(LIBODB_SQLITE_STATIC_LIB TRUE)
+endif()
 
-if (NOT TARGET sqlite3)
+if(NOT TARGET sqlite3)
+    include_directories(BEFORE ${PROJECT_SOURCE_DIR}/frameworks/sqlite3)
     add_subdirectory(${PROJECT_SOURCE_DIR}/frameworks/sqlite3)
 endif()
+
+set(LIBODB_SQLITE_HAVE_UNLOCK_NOTIFY TRUE)
+
+configure_file(${PROJECT_SOURCE_DIR}/odb/sqlite/details/config.h.in
+        ${PROJECT_SOURCE_DIR}/odb/sqlite/details/config.h)
 
 if(BUILD_UNIT_TESTS)
     enable_testing()
